@@ -21,6 +21,8 @@ function escapeHtml(value) {
 
 function categoryLabel(type) {
   switch (type) {
+    case "top-level":
+      return "Top Level";
     case "game":
       return `Most Recent ${SELECTED_TEAM_NAME} Game`;
     case "player":
@@ -29,6 +31,10 @@ function categoryLabel(type) {
       return SELECTED_TEAM_NAME;
     case "compare":
       return "Comparisons";
+    case "admin":
+      return "Admin";
+    case "watchlists":
+      return "Watchlists";
     default:
       return "Other Pages";
   }
@@ -55,8 +61,21 @@ function pagePathname(url) {
 }
 
 function sectionType(page) {
+  const pathname = pagePathname(page.url);
+
+  if (pathname === "/" || ["/schedule", "/standings", "/explore", "/teams"].includes(pathname)) {
+    return "top-level";
+  }
+
+  if (pathname === "/admin") {
+    return "admin";
+  }
+
+  if (pathname === "/watchlists") {
+    return "watchlists";
+  }
+
   if (page.type === "general") {
-    const pathname = pagePathname(page.url);
 
     if (TEAM_PAGE_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
       return "team";
@@ -75,7 +94,7 @@ function routeDisplayName(url) {
 
   const names = {
     "/admin": "Admin",
-    "/explore": "Explore",
+    "/explore": "Stat Explorer",
     "/login": "Login",
     "/schedule": "Schedule",
     "/standings": "Standings",
@@ -113,8 +132,12 @@ function displayTitle(page) {
   return title && !/^Vite App$/i.test(title) ? title : routeDisplayName(page.url);
 }
 
+function topLevelSortIndex(url) {
+  return ["/", "/schedule", "/standings", "/explore", "/teams"].indexOf(pagePathname(url));
+}
+
 export async function generateIndex(capturedPages, mostRecentSelectedTeamGameDate) {
-  const types = ["game", "player", "team", "compare", "general"];
+  const types = ["top-level", "game", "player", "team", "compare", "admin", "watchlists", "general"];
 
   const sections = types
     .map((type) => {
@@ -122,6 +145,19 @@ export async function generateIndex(capturedPages, mostRecentSelectedTeamGameDat
         .filter((page) => sectionType(page) === type)
         .map((page) => ({ ...page, title: displayTitle(page) }))
         .sort((a, b) => {
+          if (type === "top-level") {
+            return topLevelSortIndex(a.url) - topLevelSortIndex(b.url);
+          }
+
+          if (type === "team") {
+            const aSpecial = !a.tab;
+            const bSpecial = !b.tab;
+
+            if (aSpecial !== bSpecial) {
+              return aSpecial ? 1 : -1;
+            }
+          }
+
           if (a.tab && b.tab) {
             return tabSortIndex(type, a.tab) - tabSortIndex(type, b.tab);
           }
@@ -208,6 +244,7 @@ export async function generateIndex(capturedPages, mostRecentSelectedTeamGameDat
     })
     .join("\n");
 
+  const topLevelCount = capturedPages.filter((page) => sectionType(page) === "top-level").length;
   const gameCount = capturedPages.filter((page) => sectionType(page) === "game").length;
   const playerCount = capturedPages.filter((page) => sectionType(page) === "player").length;
   const teamCount = capturedPages.filter((page) => sectionType(page) === "team").length;
@@ -401,6 +438,11 @@ section > h2 span {
 </p>
 
 <div class="summary">
+
+  <span>
+    ${topLevelCount}
+    top-level pages
+  </span>
 
   <span>
     ${gameCount}
