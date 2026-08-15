@@ -7,6 +7,7 @@ import {
   PLAYER_DIR,
   PLAYER_ROUTE,
   TEAM_DIR,
+  TEAM_PAGE_ROUTE_PREFIXES,
   TEAM_ROUTE,
 } from "./config.mjs";
 
@@ -28,6 +29,28 @@ export function normalizeUrl(rawUrl, baseUrl) {
   } catch {
     return null;
   }
+}
+
+export function isLoginPageUrl(urlString) {
+  try {
+    const pathname = new URL(urlString).pathname.toLowerCase().replace(/\/+$/, "") || "/";
+
+    return pathname === "/login" || pathname === "/signin" || pathname === "/auth/login";
+  } catch {
+    return false;
+  }
+}
+
+export function canonicalizeCrawlUrl(urlString) {
+  if (!isLoginPageUrl(urlString)) {
+    return urlString;
+  }
+
+  const url = new URL(urlString);
+  url.search = "";
+  url.hash = "";
+
+  return url.href;
 }
 
 export function classifyUrl(urlString) {
@@ -91,6 +114,11 @@ export function shouldSkipAsset(urlString) {
 
 export function pageDirectory(urlString) {
   const page = classifyUrl(urlString);
+  const pathname = new URL(urlString).pathname.replace(/\/+$/, "") || "/";
+
+  if (TEAM_PAGE_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+    return TEAM_DIR;
+  }
 
   switch (page.type) {
     case "game":

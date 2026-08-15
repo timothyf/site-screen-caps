@@ -41,6 +41,18 @@ npm run capture -- http://localhost:5173
 
 This creates screenshots under docs/screenshots and updates docs/screenshots/index.html.
 
+For Admin-only tabs, create a saved browser session once:
+
+```bash
+npm run auth:admin -- http://localhost:5173
+```
+
+Complete the Admin login in the browser window, then press Enter in the terminal. Run captures with that session using:
+
+```bash
+PLAYWRIGHT_STORAGE_STATE=auth/admin.json npm run capture -- http://localhost:5173
+```
+
 ## Run Tests
 
 ```bash
@@ -60,6 +72,7 @@ Edit values in src/config.mjs to customize behavior:
 - MAX_GAME_LOOKBACK_DAYS
 - MAIN_ROUTES
 - GAME_TABS, TEAM_TABS, PLAYER_PAGE_TABS, PLAYER_PROFILE_TABS
+- ACCOUNT_MENU_PAGES
 
 ## Typical Workflow
 

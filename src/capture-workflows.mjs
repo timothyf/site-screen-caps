@@ -1,5 +1,6 @@
 import path from "path";
 import {
+  ACCOUNT_MENU_PAGES,
   COMPARE_DIR,
   COMPARE_PAGE_ROUTE,
   COMPARE_ROUTE,
@@ -120,25 +121,71 @@ async function findPlayerUrl(page, origin, playerName) {
     throw new Error("Could not find the global player search input.");
   }
 
-  await search.fill(playerName);
+  await search.click();
+  await search.fill("");
+  await search.type(playerName, { delay: 40 });
 
   const result = page
     .getByRole("option")
     .filter({ hasText: playerName })
     .first();
 
-  await result.waitFor({ state: "visible", timeout: 10000 });
-  const href = await result.locator("a[href]").first().getAttribute("href");
+  let optionVisible = false;
 
-  if (href) {
-    return normalizeUrl(href, origin);
+  try {
+    await result.waitFor({ state: "visible", timeout: 10000 });
+    optionVisible = true;
+  } catch {
+    optionVisible = false;
   }
 
-  await result.click();
-  await page.waitForURL(/\/players\/\d+\/?$/, { timeout: 10000 });
+  if (optionVisible) {
+    const optionLink = result.locator("a[href]").first();
+
+    if (await optionLink.count()) {
+      const href = await optionLink.getAttribute("href");
+
+      if (href) {
+        return normalizeUrl(href, origin);
+      }
+    }
+  }
+
+  if (optionVisible) {
+    try {
+      await Promise.all([
+        page.waitForURL(/\/players\/\d+\/?$/, { timeout: 10000 }),
+        result.click(),
+      ]);
+    } catch {
+      // Fall through to keyboard fallback.
+    }
+  }
+
+  if (!/\/players\/\d+\/?$/.test(new URL(page.url()).pathname)) {
+    await search.focus();
+
+    try {
+      await search.press("ArrowDown");
+    } catch {
+      // Ignore when widget does not support keyboard navigation.
+    }
+
+    await Promise.all([
+      page.waitForURL(/\/players\/\d+\/?$/, { timeout: 10000 }),
+      search.press("Enter"),
+    ]);
+  }
+
   const playerUrl = normalizeUrl(page.url(), origin);
+
+  if (!playerUrl) {
+    throw new Error(`Could not resolve URL for player ${playerName}.`);
+  }
+
   await page.goto(origin, { waitUntil: "networkidle", timeout: 30000 });
   await waitForPage(page);
+
   return playerUrl;
 }
 
@@ -355,16 +402,42 @@ export async function findMostRecentSelectedTeamGame(page, origin, state) {
   throw new Error(`Could not locate a recent ${SELECTED_TEAM_NAME} game.`);
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function tabNamePattern(label) {
+  const escapedLabel = escapeRegExp(label.trim());
+
+  // Tabs such as "Roster 26" and "Roster (26)" include a live count badge
+  // in their accessible name even though the configured tab label is "Roster".
+  return new RegExp(`^\\s*${escapedLabel}(?:\\s*[([]?\\s*\\d+\\s*[)\\]]?)?\\s*$`, "i");
+}
+
+function tabLabelVariants(label) {
+  if (label === "Player Notes") {
+    return [label, "Notes"];
+  }
+
+  return [label];
+}
+
 async function findTab(page, label) {
-  const strategies = [
-    page.getByRole("tab", { name: label, exact: true }).first(),
-    page.getByRole("link", { name: label, exact: true }).first(),
-    page.getByRole("button", { name: label, exact: true }).first(),
-    page.getByText(label, { exact: true }).first(),
-  ];
+  const strategies = [];
+
+  for (const variant of tabLabelVariants(label)) {
+    const name = tabNamePattern(variant);
+
+    strategies.push(
+      page.getByRole("tab", { name, exact: false }).first(),
+      page.getByRole("link", { name, exact: false }).first(),
+      page.getByRole("button", { name, exact: false }).first(),
+      page.getByText(name).first(),
+    );
+  }
 
   for (const locator of strategies) {
-    if (await locator.count()) {
+    if (await locator.count() && (await locator.isVisible().catch(() => false))) {
       return locator;
     }
   }
@@ -449,6 +522,7 @@ export async function captureTeamTabs(page, teamUrl, origin, state) {
   await waitForPage(page);
 
   const title = (await page.title()).trim() || SELECTED_TEAM_NAME;
+  const internalLinks = new Set();
 
   for (const tab of TEAM_TABS) {
     try {
@@ -476,12 +550,16 @@ export async function captureTeamTabs(page, teamUrl, origin, state) {
       });
 
       console.log(`    Captured: ${relativePath}`);
+
+      for (const link of await getInternalLinks(page, origin)) {
+        internalLinks.add(link);
+      }
     } catch (error) {
       console.error(`ERROR capturing team tab "${tab.label}": ${error.message}`);
     }
   }
 
-  return getInternalLinks(page, origin);
+  return [...internalLinks];
 }
 
 export async function capturePlayerTabs(page, playerUrl, origin, state) {
@@ -500,7 +578,12 @@ export async function capturePlayerTabs(page, playerUrl, origin, state) {
   const title = (await page.title()).trim() || playerName;
 
   for (const pageTab of PLAYER_PAGE_TABS) {
-    await activateTab(page, pageTab.label);
+    try {
+      await activateTab(page, pageTab.label);
+    } catch (error) {
+      console.warn(`  Skipping unavailable player tab "${pageTab.label}": ${error.message}`);
+      continue;
+    }
 
     if (pageTab.filename === "overview") {
       for (const profileTab of PLAYER_PROFILE_TABS) {
@@ -848,5 +931,158 @@ export async function captureComparisons(page, origin, state) {
         // Ignore.
       }
     }
+  }
+}
+
+async function findVisibleLocator(locator) {
+  const count = await locator.count();
+
+  for (let i = 0; i < count; i++) {
+    const candidate = locator.nth(i);
+
+    if (await candidate.isVisible().catch(() => false)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function findAccountMenuItem(page, label) {
+  const byLink = await findVisibleLocator(
+    page.getByRole("link", {
+      name: new RegExp(`^${escapeRegExp(label)}$`, "i"),
+    })
+  );
+
+  if (byLink) {
+    return byLink;
+  }
+
+  return findVisibleLocator(
+    page.getByText(new RegExp(`^${escapeRegExp(label)}$`, "i"))
+  );
+}
+
+async function openAccountMenu(page) {
+  const triggers = page.locator([
+    'header [aria-haspopup="menu"]',
+    'nav [aria-haspopup="menu"]',
+    'header button',
+    'nav button',
+    'header [role="button"]',
+    'nav [role="button"]',
+    'body > * button',
+    'body > * [role="button"]',
+  ].join(","));
+
+  for (let i = 0; i < await triggers.count(); i++) {
+    const trigger = triggers.nth(i);
+
+    if (!(await trigger.isVisible().catch(() => false))) {
+      continue;
+    }
+
+    const isTopRightControl = await trigger.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+
+      return rect.top >= 0 && rect.top < 160 && rect.right > viewportWidth * 0.7;
+    }).catch(() => false);
+
+    if (!isTopRightControl) {
+      continue;
+    }
+
+    const pageUrlBeforeClick = page.url();
+
+    await trigger.click();
+    await page.waitForTimeout(250);
+
+    const links = new Map();
+
+    for (const target of ACCOUNT_MENU_PAGES) {
+      const link = await findAccountMenuItem(page, target.label);
+
+      if (link) {
+        links.set(target.label, link);
+      }
+    }
+
+    if (links.size > 0) {
+      return links;
+    }
+
+    await page.keyboard.press("Escape").catch(() => {});
+
+    if (page.url() !== pageUrlBeforeClick) {
+      await page.goto(pageUrlBeforeClick, {
+        waitUntil: "networkidle",
+        timeout: 30000,
+      });
+      await waitForPage(page);
+    }
+  }
+
+  return null;
+}
+
+export async function captureAccountMenuPages(page, origin, state) {
+  console.log("\nCapturing authenticated account pages...");
+
+  await page.goto(origin, {
+    waitUntil: "networkidle",
+    timeout: 30000,
+  });
+  await waitForPage(page);
+
+  const menu = await openAccountMenu(page);
+
+  if (!menu) {
+    console.log("  No Admin account menu found; skipping Admin and Watchlists.");
+    return;
+  }
+
+  const targets = ACCOUNT_MENU_PAGES.map((target) => ({
+    ...target,
+    link: menu.get(target.label),
+  })).map((target) => ({
+    ...target,
+    hrefPromise: target.link?.getAttribute("href"),
+  }));
+
+  for (const target of targets) {
+    if (!target.hrefPromise) {
+      console.log(`  ${target.label} link is unavailable; skipping.`);
+      continue;
+    }
+
+    const href = await target.hrefPromise;
+    const url = normalizeUrl(href, page.url());
+
+    if (!url) {
+      console.warn(`  Could not resolve the ${target.label} link.`);
+      continue;
+    }
+
+    await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+    await waitForPage(page);
+    await autoScroll(page);
+    await waitForContent(page);
+
+    const relativePath = target.filename;
+    await page.screenshot({
+      path: path.join(OUTPUT_DIR, relativePath),
+      fullPage: true,
+    });
+
+    state.capturedPages.push({
+      url: page.url(),
+      screenshotPath: relativePath,
+      title: (await page.title()).trim() || target.label,
+      type: "general",
+    });
+
+    console.log(`  Captured: ${relativePath}`);
   }
 }

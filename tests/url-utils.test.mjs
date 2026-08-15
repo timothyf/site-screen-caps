@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  canonicalizeCrawlUrl,
   classifyUrl,
+  isLoginPageUrl,
   normalizeUrl,
   pageDirectory,
   screenshotFilename,
@@ -49,6 +51,8 @@ test("pageDirectory maps page type to output directory", () => {
   assert.equal(pageDirectory("https://example.com/games/1"), "games");
   assert.equal(pageDirectory("https://example.com/players/1"), "players");
   assert.equal(pageDirectory("https://example.com/teams/1"), "teams");
+  assert.equal(pageDirectory("https://example.com/lineup-scenarios/3"), "teams");
+  assert.equal(pageDirectory("https://example.com/opponent-reports/3"), "teams");
   assert.equal(pageDirectory("https://example.com/compare"), "compare");
   assert.equal(pageDirectory("https://example.com/explore"), "");
 });
@@ -69,5 +73,31 @@ test("screenshotFilename handles typed and general pages", () => {
 test("screenshotRelativePath joins directory and filename", () => {
   assert.equal(screenshotRelativePath("https://example.com/games/77"), "games/game-77.png");
   assert.equal(screenshotRelativePath("https://example.com/compare"), "compare/compare.png");
+  assert.equal(
+    screenshotRelativePath("https://example.com/lineup-scenarios/3"),
+    "teams/lineup-scenarios__3.png"
+  );
+  assert.equal(
+    screenshotRelativePath("https://example.com/opponent-reports/3"),
+    "teams/opponent-reports__3.png"
+  );
   assert.equal(screenshotRelativePath("https://example.com/explore"), "explore.png");
+});
+
+test("isLoginPageUrl matches known login-style paths", () => {
+  assert.equal(isLoginPageUrl("https://example.com/login"), true);
+  assert.equal(isLoginPageUrl("https://example.com/signin"), true);
+  assert.equal(isLoginPageUrl("https://example.com/auth/login"), true);
+  assert.equal(isLoginPageUrl("https://example.com/teams/5"), false);
+});
+
+test("canonicalizeCrawlUrl strips query/hash for login pages only", () => {
+  assert.equal(
+    canonicalizeCrawlUrl("https://example.com/login?redirect=%2Fteams%2F15#top"),
+    "https://example.com/login"
+  );
+  assert.equal(
+    canonicalizeCrawlUrl("https://example.com/schedule?date=2026-08-14#section"),
+    "https://example.com/schedule?date=2026-08-14#section"
+  );
 });

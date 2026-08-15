@@ -17,10 +17,12 @@ import {
   TEAM_TABS,
   VIEWPORT,
 } from "./config.mjs";
+import { canonicalizeCrawlUrl } from "./url-utils.mjs";
 import { classifyUrl, normalizeUrl, screenshotRelativePath, shouldSkipAsset } from "./url-utils.mjs";
 import { autoScroll, getInternalLinks, waitForContent, waitForPage } from "./browser-utils.mjs";
 import {
   captureComparisons,
+  captureAccountMenuPages,
   captureGameTabs,
   capturePlayerTabs,
   captureTeamTabs,
@@ -38,12 +40,17 @@ function addToQueue(queue, rawUrl, baseUrl, state) {
     return;
   }
 
-  if (state.visited.has(normalized) || state.queued.has(normalized)) {
+  const crawlUrl = canonicalizeCrawlUrl(normalized);
+  if (!crawlUrl) {
     return;
   }
 
-  queue.push(normalized);
-  state.queued.add(normalized);
+  if (state.visited.has(crawlUrl) || state.queued.has(crawlUrl)) {
+    return;
+  }
+
+  queue.push(crawlUrl);
+  state.queued.add(crawlUrl);
 }
 
 function countByType(items, type) {
@@ -76,6 +83,7 @@ export async function crawl(startUrl) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 1,
+    storageState: process.env.PLAYWRIGHT_STORAGE_STATE || undefined,
   });
 
   const discoveryPage = await context.newPage();
@@ -208,6 +216,7 @@ export async function crawl(startUrl) {
   }
 
   await captureComparisons(page, origin, state);
+  await captureAccountMenuPages(page, origin, state);
   await browser.close();
 
   await generateIndex(state.capturedPages, state.mostRecentSelectedTeamGameDate);
