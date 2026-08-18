@@ -562,6 +562,33 @@ export async function captureTeamTabs(page, teamUrl, origin, state) {
   return [...internalLinks];
 }
 
+export function getPlayerPageTabs(isPitcher = false) {
+  const tabs = [...PLAYER_PAGE_TABS];
+
+  if (isPitcher && !tabs.some((tab) => tab.label === "Pitch Arsenal")) {
+    tabs.push({ label: "Pitch Arsenal", filename: "pitch-arsenal" });
+  }
+
+  return tabs;
+}
+
+async function isPitcherPlayer(page) {
+  const pageText = await page.locator("main").innerText().catch(() => "");
+  const upper = pageText.toLowerCase();
+
+  if (/\bpitcher\b/i.test(upper) || /position\s*[:\-]?\s*P\b/i.test(upper)) {
+    return true;
+  }
+
+  const roleLabel = page.getByText(/Pitcher|P\b/i).first();
+
+  try {
+    return (await roleLabel.count()) > 0 && (await roleLabel.isVisible().catch(() => false));
+  } catch {
+    return false;
+  }
+}
+
 export async function capturePlayerTabs(page, playerUrl, origin, state) {
   const playerId = classifyUrl(playerUrl).id;
   const playerName = `Player ${playerId}`;
@@ -576,8 +603,9 @@ export async function capturePlayerTabs(page, playerUrl, origin, state) {
   await waitForPage(page);
 
   const title = (await page.title()).trim() || playerName;
+  const playerTabs = getPlayerPageTabs(await isPitcherPlayer(page));
 
-  for (const pageTab of PLAYER_PAGE_TABS) {
+  for (const pageTab of playerTabs) {
     try {
       await activateTab(page, pageTab.label);
     } catch (error) {

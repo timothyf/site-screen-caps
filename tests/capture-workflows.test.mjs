@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCaptureState, shouldCaptureUrl } from "../src/capture-workflows.mjs";
+import { createCaptureState, getPlayerPageTabs, shouldCaptureUrl } from "../src/capture-workflows.mjs";
 
 test("createCaptureState returns empty default state", () => {
   const state = createCaptureState();
@@ -79,4 +79,13 @@ test("shouldCaptureUrl allows general routes", () => {
   assert.equal(shouldCaptureUrl("https://example.com/", state), true);
   assert.equal(shouldCaptureUrl("https://example.com/explore", state), true);
   assert.equal(shouldCaptureUrl("https://example.com/schedule", state), true);
+});
+
+test("getPlayerPageTabs includes Pitch Arsenal only for pitchers", () => {
+  const hitterTabs = getPlayerPageTabs(false);
+  const pitcherTabs = getPlayerPageTabs(true);
+
+  assert.equal(hitterTabs.some((tab) => tab.label === "Pitch Arsenal"), false);
+  assert.equal(pitcherTabs.some((tab) => tab.label === "Pitch Arsenal"), true);
+  assert.equal(pitcherTabs.at(-1)?.label, "Pitch Arsenal");
 });
